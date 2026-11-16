@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .contracts import HarvestError, Manifest, Record, Source
+from .contracts import HarvestError, Manifest, Record, Rule, Source
 from .extractors import extract
 from .intake import find_page, read_manifest, read_page
 from .ledger import Ledger
@@ -32,6 +32,9 @@ class Harvester:
 
     def register_source(self, declaration: dict) -> dict:
         return self.ledger.register(Source.parse(declaration))
+
+    def register_rule(self, declaration: dict) -> dict:
+        return self.ledger.register_rule(Rule.parse(declaration))
 
     def ingest(self, manifest_path: str | Path, *, stop_on_error: bool = False,
                only_page: int | None = None) -> dict:

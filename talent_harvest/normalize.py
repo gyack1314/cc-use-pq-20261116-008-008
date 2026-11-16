@@ -4,17 +4,12 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Any
 import re
-import unicodedata
 
-from .contracts import HarvestError, Record, Source, content_digest, identifier, required
+from .contracts import HarvestError, Record, Source, compact, content_digest, identifier, required
 
 
 FIELDS = {"record_id", "organization", "title", "region", "discipline",
           "quantity", "published_at", "reference", "description"}
-
-
-def compact(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).split())
 
 
 def search_key(value: str) -> str:

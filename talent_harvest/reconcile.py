@@ -39,6 +39,22 @@ def choose_preferred(rows: list[dict]) -> dict:
                                          row["record_id"], -row["version"]))[0]
 
 
+def same_claim(first: dict, second: dict) -> bool:
+    return (first["discipline"].casefold() == second["discipline"].casefold()
+            and first["quantity"] == second["quantity"]
+            and first["published_at"] == second["published_at"])
+
+
+def authority_match(record: dict, source_key: str, rules: list[dict]) -> dict | None:
+    matches = [rule for rule in rules
+               if rule["source"] == source_key and rule["kind"] == record["kind"]
+               and record["region"] in rule["regions"]
+               and rule["valid_from"] <= record["published_at"] <= rule["valid_until"]]
+    if not matches:
+        return None
+    return sorted(matches, key=lambda rule: (rule["key"], rule["revision"]))[0]
+
+
 def reconcile_group(rows: list[dict]) -> tuple[str, str, dict | None]:
     if not rows:
         return "empty", "", None

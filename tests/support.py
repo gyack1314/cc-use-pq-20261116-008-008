@@ -16,6 +16,12 @@ def source(key="company", fmt="json", kind="position", trust=70, field_map=None)
             "kind": kind, "field_map": field_map or {}, "trust": trust}
 
 
+def rule(key="city-priority", source="city-portal", kind="position", regions=("Shanghai",),
+         valid_from="2026-01-01", valid_until="2026-12-31", note=""):
+    return {"key": key, "source": source, "kind": kind, "regions": list(regions),
+            "valid_from": valid_from, "valid_until": valid_until, "note": note}
+
+
 def record(record_id="role-1", organization="North University", title="AI Engineer",
            region="Shanghai", discipline="Computer Science", quantity=4,
            published_at="2026-09-01", reference="https://example.test/role/1", description="Training role"):
@@ -72,6 +78,9 @@ class Workspace:
 
     def register(self, **kwargs):
         return self.harvester.register_source(source(**kwargs))
+
+    def register_rule(self, **kwargs):
+        return self.harvester.register_rule(rule(**kwargs))
 
     def ingest(self, **kwargs):
         source_key = kwargs.pop("key", "company")

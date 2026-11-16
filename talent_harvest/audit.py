@@ -45,6 +45,7 @@ class Auditor:
         records = self.ledger.db.execute("SELECT * FROM source_records ORDER BY source,record_id").fetchall()
         for record in records:
             findings.extend(self._record_cursor(record))
+        findings.extend(self._rules())
         foreign_keys = self.ledger.db.execute("PRAGMA foreign_key_check").fetchall()
         for row in foreign_keys:
             findings.append(Finding("error", "foreign_key", str(tuple(row)), "dangling reference"))
@@ -52,6 +53,33 @@ class Auditor:
                 "counts": {"sources": len(sources), "batches": len(batches), "pages": len(pages),
                            "observations": len(observations), "record_cursors": len(records)},
                 "findings": [finding.document() for finding in findings]}
+
+    def _rules(self) -> list[Finding]:
+        findings: list[Finding] = []
+        rows = self.ledger.db.execute("SELECT * FROM priority_rules ORDER BY key,revision").fetchall()
+        by_key: dict[str, list] = defaultdict(list)
+        for row in rows:
+            by_key[row["key"]].append(row)
+        for key, revisions in by_key.items():
+            location = f"rule:{key}"
+            numbers = [row["revision"] for row in revisions]
+            if numbers != list(range(1, len(numbers) + 1)):
+                findings.append(Finding("error", "rule_revision_gap", location,
+                                        "rule revisions are not contiguous"))
+            active = [row for row in revisions if row["superseded_at"] is None]
+            if len(active) != 1 or active[0]["revision"] != max(numbers):
+                findings.append(Finding("error", "rule_active", location,
+                                        "exactly the latest revision must be active"))
+        actives = [row for row in rows if row["superseded_at"] is None]
+        for left, right in ((a, b) for i, a in enumerate(actives) for b in actives[i + 1:]):
+            if left["source"] == right["source"] or left["kind"] != right["kind"]:
+                continue
+            shared = set(json.loads(left["regions"])) & set(json.loads(right["regions"]))
+            if shared and max(left["valid_from"], right["valid_from"]) <= min(left["valid_until"], right["valid_until"]):
+                findings.append(Finding("error", "rule_overlap",
+                                        f"rule:{left['key']}|{right['key']}",
+                                        f"active rules overlap on {sorted(shared)}"))
+        return findings
 
     def _source(self, row: Any) -> list[Finding]:
         location = f"source:{row['key']}"
@@ -106,6 +134,11 @@ class Auditor:
                 result.append(Finding("error", "page_time", location, "complete page has no timestamp"))
             if row["error_code"]:
                 result.append(Finding("error", "page_error", location, "complete page still has error"))
+            try:
+                if not isinstance(json.loads(row["rules_basis"] or "{}"), dict):
+                    raise ValueError("basis is not an object")
+            except ValueError:
+                result.append(Finding("error", "page_basis", location, "complete page lacks a valid rules basis"))
         elif actual:
             result.append(Finding("error", "partial_page", location, "incomplete page has observations"))
         if row["attempts"] < 0:

@@ -9,7 +9,7 @@ import json
 
 from .contracts import HarvestError, canonical
 from .ledger import Ledger
-from .reconcile import reconcile_group
+from .reconcile import authority_match, reconcile_group, same_claim
 
 
 def _latest_per_source(rows: list[dict]) -> list[dict]:
@@ -34,8 +34,39 @@ class Delivery:
     def __init__(self, ledger: Ledger):
         self.ledger = ledger
 
+    @staticmethod
+    def _entity(identity: str, group: list[dict], winner: dict,
+                authority: dict | None, objections: list[dict]) -> dict:
+        objection_ids = {row["id"] for row in objections}
+        evidence = [_project(item) for item in sorted(group, key=lambda x: (x["source"], x["record_id"]))
+                    if item["status"] == "accepted" and item["id"] not in objection_ids]
+        return {"identity": identity, "record": winner["record"],
+                "selected": _project(winner),
+                "evidence": evidence,
+                "objections": [_project(item) for item in
+                               sorted(objections, key=lambda x: (x["source"], x["record_id"]))],
+                "authority": authority}
+
+    def _authority_winner(self, group: list[dict], rules: list[dict]) -> tuple[dict, dict] | None:
+        matches = []
+        for row in group:
+            if row["status"] != "accepted":
+                continue
+            rule = authority_match(row["record"], row["source"], rules)
+            if rule is not None:
+                matches.append((row, rule))
+        if not matches or len({row["source"] for row, _ in matches}) != 1:
+            return None
+        row, rule = sorted(matches, key=lambda item: (item[0]["source"], item[0]["record_id"],
+                                                      -item[0]["version"], item[0]["id"]))[0]
+        basis = {"rule": rule["key"], "revision": rule["revision"], "source": rule["source"],
+                 "kind": rule["kind"], "regions": rule["regions"],
+                 "valid_from": rule["valid_from"], "valid_until": rule["valid_until"]}
+        return row, basis
+
     def current(self, *, include_quarantine: bool = False) -> dict:
         rows = [row for row in _latest_per_source(self.ledger.observations()) if not row["withdrawn_at"]]
+        rules = self.ledger.active_rules()
         groups: dict[str, list[dict]] = defaultdict(list)
         for row in rows:
             groups[row["identity"]].append(row)
@@ -49,14 +80,25 @@ class Delivery:
                 quarantined.extend(_project(row) for row in rejected)
             status, reason, winner = reconcile_group(group)
             if status == "accepted" and winner:
-                accepted.append({"identity": identity, "record": winner["record"],
-                                 "selected": _project(winner),
-                                 "evidence": [_project(item) for item in sorted(group, key=lambda x: (x["source"], x["record_id"]))
-                                              if item["status"] == "accepted"]})
+                authoritative = self._authority_winner(group, rules)
+                if authoritative is not None:
+                    winner, rule = authoritative
+                    accepted.append(self._entity(identity, group, winner, rule, []))
+                else:
+                    accepted.append(self._entity(identity, group, winner, None, []))
             elif status == "conflict":
-                conflicts.append({"identity": identity, "reason": reason,
-                                  "evidence": [_project(item) for item in group if item["status"] == "accepted"]})
-        return {"schema_version": 1, "accepted": accepted, "conflicts": conflicts,
+                authoritative = self._authority_winner(group, rules)
+                if authoritative is not None:
+                    winner, rule = authoritative
+                    objections = [row for row in group if row["status"] == "accepted"
+                                  and row["id"] != winner["id"]
+                                  and not same_claim(row["record"], winner["record"])]
+                    accepted.append(self._entity(identity, group, winner, rule, objections))
+                else:
+                    conflicts.append({"identity": identity, "reason": reason,
+                                      "evidence": [_project(item) for item in group if item["status"] == "accepted"]})
+        return {"schema_version": 1, "rules_basis": {rule["key"]: rule["revision"] for rule in rules},
+                "accepted": accepted, "conflicts": conflicts,
                 "quarantined": quarantined if include_quarantine else [],
                 "counts": {"accepted": len(accepted), "conflicts": len(conflicts),
                            "quarantined": len(quarantined) if include_quarantine else 0}}

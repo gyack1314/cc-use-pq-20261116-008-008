@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 import json
 import re
+import unicodedata
 
 
 class HarvestError(ValueError):
@@ -44,6 +45,19 @@ def instant(value: Any, field: str) -> str:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise HarvestError("invalid_time", f"{field} needs timezone")
     return parsed.isoformat()
+
+
+def compact(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).split())
+
+
+def day(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise HarvestError("invalid_day", f"{field} must be YYYY-MM-DD")
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise HarvestError("invalid_day", f"{field} must be YYYY-MM-DD") from None
 
 
 def canonical(value: Any) -> str:
@@ -157,3 +171,44 @@ class Record:
 
     def document(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class Rule:
+    key: str
+    source: str
+    kind: str
+    regions: tuple[str, ...]
+    valid_from: str
+    valid_until: str
+    note: str
+
+    @classmethod
+    def parse(cls, value: Any) -> "Rule":
+        if not isinstance(value, dict):
+            raise HarvestError("rule_shape", "rule must be object")
+        kind = value.get("kind")
+        if kind not in KINDS:
+            raise HarvestError("rule_kind", "rule kind must be a supported business kind")
+        raw_regions = value.get("regions")
+        if not isinstance(raw_regions, list) or not 1 <= len(raw_regions) <= 64:
+            raise HarvestError("rule_regions", "regions must list 1-64 region names")
+        regions = []
+        for item in raw_regions:
+            if not isinstance(item, str) or not compact(item):
+                raise HarvestError("rule_regions", "region names must be nonempty text")
+            regions.append(compact(required(item, "region", 80)))
+        valid_from = day(value.get("valid_from"), "valid_from")
+        valid_until = day(value.get("valid_until"), "valid_until")
+        if valid_from > valid_until:
+            raise HarvestError("rule_period", "valid_from must not be after valid_until")
+        note = value.get("note", "")
+        if not isinstance(note, str) or len(note) > 240:
+            raise HarvestError("rule_note", "note must be a short string")
+        return cls(identifier(value.get("key"), "rule key"), identifier(value.get("source"), "rule source"),
+                   kind, tuple(sorted(set(regions))), valid_from, valid_until, note.strip())
+
+    def document(self) -> dict[str, Any]:
+        return {"key": self.key, "source": self.source, "kind": self.kind,
+                "regions": list(self.regions), "valid_from": self.valid_from,
+                "valid_until": self.valid_until, "note": self.note}

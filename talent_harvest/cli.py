@@ -24,6 +24,9 @@ def parser() -> ArgumentParser:
     actions = command.add_subparsers(dest="action", required=True)
     register = actions.add_parser("register", help="register a source declaration")
     register.add_argument("declaration")
+    register_rule = actions.add_parser("register-rule", help="register an official-source priority rule")
+    register_rule.add_argument("declaration")
+    actions.add_parser("rules", help="show priority rule registry and rejections")
     ingest = actions.add_parser("ingest", help="ingest or resume a manifest")
     ingest.add_argument("manifest")
     ingest.add_argument("--page", type=int)
@@ -113,6 +116,10 @@ def execute(args: Namespace) -> dict:
         delivery = Delivery(ledger)
         if args.action == "register":
             return harvester.register_source(load_declaration(args.declaration))
+        if args.action == "register-rule":
+            return harvester.register_rule(load_declaration(args.declaration))
+        if args.action == "rules":
+            return {"rules": ledger.rules(), "rejections": ledger.rule_rejections()}
         if args.action == "ingest":
             return harvester.ingest(args.manifest, stop_on_error=args.stop_on_error, only_page=args.page)
         if args.action == "status":

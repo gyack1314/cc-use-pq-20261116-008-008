@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from hashlib import sha256
 from typing import Any
+import json
 
 from .contracts import HarvestError, canonical
 from .ledger import Ledger
@@ -58,6 +59,7 @@ class Lineage:
             pages.append({"ordinal": page["ordinal"], "path": page["path"],
                           "sha256": page["digest"], "state": page["state"],
                           "attempts": page["attempts"],
+                          "rules_basis": json.loads(page["rules_basis"] or "{}"),
                           "observations": [{"id": row["id"], "record_id": row["record_id"],
                                             "identity": row["identity"], "version": row["version"],
                                             "status": row["status"], "raw_digest": row["raw_digest"]}

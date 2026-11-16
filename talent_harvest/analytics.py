@@ -99,9 +99,14 @@ class Analytics:
         for item in current["conflicts"]:
             for evidence in item["evidence"]:
                 affected_sources[evidence["source"]][item["reason"]] += 1
+        overruled = [{"identity": entity["identity"], "authority": entity["authority"],
+                      "objections": entity["objections"]}
+                     for entity in current["accepted"] if entity["objections"]]
         return {"conflicts": current["conflicts"],
                 "by_reason": dict(sorted(reasons.items())),
-                "by_source": self._plain(affected_sources)}
+                "by_source": self._plain(affected_sources),
+                "overruled": overruled,
+                "overruled_count": len(overruled)}
 
     def delivery_health(self) -> dict:
         current = self.delivery.current(include_quarantine=True)
